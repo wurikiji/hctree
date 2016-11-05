@@ -21,8 +21,11 @@
 #define		RETURN_FAIL		0x02
 #define		RETURN_SYSTEM	0x04
 
+#define		RETURN_EXIST	0x00
+#define		RETURN_NOTEXIST	0x01
 
 #define BLOCK_SIZE		(4096)  //block size in bytes
+#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t) * 2))
 
 
 typedef struct __hctree hctree;
@@ -36,14 +39,18 @@ struct __hctree{
 	node*	lru;		// head page of LRU list
 	unordered_map<uint64_t, node*> hmap; // hash map for searching page
 	uint64_t iTouched; 	// total touchcount for this tree
+	uint64_t pgCount;	// # of pages
 };
 
 // This will be managed as LRU list
 struct __node{
-	uint64_t 	iTouched; 	// total touchcount for this node
 	node*		next;
 	node*		prev;
 	void*		data; 		// Memmory addresses for data
+	uint64_t 	iTouched; 	// total touchcount for this node
+	uint64_t	iParent; 	// parent node page number
+	uint64_t	iCount; 	// # of total records in this node
+	uint64_t	pgno;
 };
 
 
@@ -81,7 +88,7 @@ int get(hctree *tree, KEY_TYPE key, bool hot) ;
 	* Insert data into hctree
 	* If you already know hotness, give a touch count hint
 	*/
-int put(hctree *tree, KEY_TYPE key, uint64_t hint) ;
+int put(hctree *tree, KEY_TYPE key, bool hot) ;
 
 /*	*
 	* Remove data from hctree

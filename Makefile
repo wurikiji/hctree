@@ -6,7 +6,7 @@ RM	= rm
 
 INCLUDES = -I./
 CPPFLAGS 	= -fpic -std=gnu++11
-CXXFLAGS 	= -fpic -std=gnu++11
+#CXXFLAGS 	= -fpic -std=gnu++11
 ASFLAGS	= 
 LDFLAGS	= -L./
 LIBS	= 
