@@ -8,6 +8,37 @@
 
 #define KEY_TYPE uint64_t
 
+/* 	*
+	* Open new db files using hctree 
+	* This function will allocate a space for hctree **tree
+	*/
+int open(hctree **tree, char *dbname)
+{
+	*tree = (hctree*) malloc(sizeof(hctree));
+	
+	if (tree == NULL) {
+		goto mem_fail;
+	}
+	
+	memset(*tree, 0, sizeof(hctree));
+
+	tree->fd = open(dbname, O_RDWR | O_DIRECT);
+	if (tree->fd) {
+		goto open_fail;
+	}
+
+mem_fail:
+
+open_fail:
+}
+
+/*	*
+	* Close db 
+	*/
+int close(hctree **tree)
+{
+}
+
 /*	*
 	* Get data from hctree
 	* If you already know hotness, give a hint to tree

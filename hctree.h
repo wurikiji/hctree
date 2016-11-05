@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <hash_map>
 
 
 // user can define KEY_TYPE before including hctree.h
@@ -25,13 +26,43 @@
 
 
 typedef struct __hctree hctree;
+typedef struct __node node;
 
+using namespace stdext;
 struct __hctree{
 	bool isHctree;		// true for hctree, false for b+tree
 	int fd;				// file descriptor for this tree
-	void*	root;		// root page
+	node*	lru;		// head page of LRU list
+	hash_map<KEY_TYPE, void*> hmap; // hash map for searching page
 	uint64_t iTouched; 	// total touchcount for this tree
 };
+
+// This will be managed as LRU list
+struct __node{
+	uint64_t 	iTouched; 	// total touchcount for this node
+	node*		next;
+	node*		prev;
+	void*		data; 		// Memmory addresses for data
+};
+
+
+struct __file_header{
+};
+
+struct __page_header{
+	uint64_t pgno;
+};
+
+/* 	*
+	* Open new db files using hctree 
+	* This function will allocate a space for hctree **tree
+	*/
+int open(hctree **tree, char *dbname);
+
+/*	*
+	* Close db 
+	*/
+int close(hctree **tree);
 
 /*	*
 	* Get data from hctree
