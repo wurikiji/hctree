@@ -1,10 +1,19 @@
+#define __GNU_LINUX
 #include <stdio.h>
+#include <algorithm>
 #include <inttypes.h>
+#include <utility>
 #include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <string.h>
 #include <stdlib.h>
 #include "util.h"
 #include "hctree.h"
+#include <unordered_map>
+#include <fcntl.h>
+
+using namespace std;
 
 #define KEY_TYPE uint64_t
 
@@ -14,29 +23,74 @@
 	*/
 int open(hctree **tree, char *dbname)
 {
+	int ret = 0;
+	node* lru;
+	void* data;
+	int fd;
 	*tree = (hctree*) malloc(sizeof(hctree));
-	
 	if (tree == NULL) {
-		goto mem_fail;
+		ret = RETURN_NOMEM;
+		goto fail;
 	}
-	
 	memset(*tree, 0, sizeof(hctree));
 
-	tree->fd = open(dbname, O_RDWR | O_DIRECT);
-	if (tree->fd) {
-		goto open_fail;
+	lru = (node*) malloc(sizeof(node));
+	if (NULL == lru) {
+		ret = RETURN_NOMEM;
+		goto fail;
+	}
+	memset(lru, 0, sizeof(node));
+
+	ret = __memalign(&data, 512, BLOCK_SIZE);
+	if (ret) {
+		ret = RETURN_NOMEM;
+		goto fail;
+	}
+	memset(data, 0, BLOCK_SIZE);
+
+	fd = open(dbname, O_RDWR | O_DIRECT);
+	if (fd) {
+		ret = RETURN_SYSTEM;
+		goto fail;
 	}
 
-mem_fail:
+	lru->data = data;
+	lru->iTouched = 0;
+	(*tree)->lru = lru;
+	(*tree)->hmap.insert(pair<uint64_t, node*>(0, lru)); // add lru head
+	return RETURN_SUCCESS;
 
-open_fail:
+fail:
+	if (*tree) {
+		if (lru) {
+			if (data) {
+				__free(data);
+			}
+			__free(lru);
+		}
+		__free(*tree);
+	}
+	return ret;
 }
 
 /*	*
 	* Close db 
 	*/
-int close(hctree **tree)
+int close(hctree *tree)
 {
+	if (tree) {
+		if (tree->lru) {
+			if (tree->lru->data) {
+				__free(tree->lru->data);
+			}
+			__free(tree->lru->data);
+		}
+		__free(tree);
+	}
+	if (tree->fd > 0) {
+		close(tree->fd);
+	}
+	return RETURN_SUCCESS;
 }
 
 /*	*

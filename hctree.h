@@ -1,5 +1,5 @@
 #include <inttypes.h>
-#include <hash_map>
+#include <unordered_map>
 
 
 // user can define KEY_TYPE before including hctree.h
@@ -8,8 +8,8 @@
 #endif // end of KEY_TYPE
 
 
-#define		BTREE 		0x01
-#define		HCTREE		0x02
+#define		BTREE 		0x00
+#define		HCTREE		0x01
 
 
 #define		HOT_DATA	0x01
@@ -28,12 +28,13 @@
 typedef struct __hctree hctree;
 typedef struct __node node;
 
-using namespace stdext;
+using namespace std;
+
 struct __hctree{
 	bool isHctree;		// true for hctree, false for b+tree
 	int fd;				// file descriptor for this tree
 	node*	lru;		// head page of LRU list
-	hash_map<KEY_TYPE, void*> hmap; // hash map for searching page
+	unordered_map<uint64_t, node*> hmap; // hash map for searching page
 	uint64_t iTouched; 	// total touchcount for this tree
 };
 
@@ -53,6 +54,9 @@ struct __page_header{
 	uint64_t pgno;
 };
 
+struct __record{
+
+};
 /* 	*
 	* Open new db files using hctree 
 	* This function will allocate a space for hctree **tree

@@ -5,8 +5,8 @@ LD 	= $(PREFIX)ld
 RM	= rm
 
 INCLUDES = -I./
-CPPFLAGS 	= -fpic 
-CXXFLAGS 	= -fpic 
+CPPFLAGS 	= -fpic -std=gnu++11
+CXXFLAGS 	= -fpic -std=gnu++11
 ASFLAGS	= 
 LDFLAGS	= -L./
 LIBS	= 
