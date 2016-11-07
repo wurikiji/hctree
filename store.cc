@@ -8,32 +8,41 @@
 
 using namespace std;
 
-int main(void) 
+int main(int argc, char *argv[]) 
 {
-	hctree *tree;
+	hctree tree;
 	vector<uint64_t> v;
-	int num = MAX_RECORDS * 1024;
+	int num = MAX_RECORDS ;
+
+	if (argc > 1)
+		num = atoi(argv[1]);
+
 	printf("Hello\n");
 	hc_open(&tree);
 
 	srand(time(NULL));
-	printf("Get and store %d\n", num);
-	for (int i =0 ;i < num; i++)
+	printf("Get and store %d, max record %d\n", num, MAX_RECORDS);
+	for (int i =1 ;i <= num; i++)
 	{
+#if 0
 		v.push_back(rand()%1048576);
-		hc_put(tree, v[i], 0);
+#else
+		v.push_back(i);
+#endif
+		hc_put(&tree, v[i-1], 0);
+		//printf("%d ", i);
 	}
 
-	for (int i = 0;i < num;i++)
+	for (int i = 1;i <= num;i++)
 	{
-		if (RETURN_EXIST != hc_get(tree, v[i],0))
+		//printf("Get %d\n", i);
+		if (RETURN_EXIST != hc_get(&tree, v[i-1],0))
 		{
-			printf("Not exist %d, %" PRIu64 "\n", i, v[i]);
 			break;
 		}
 	}
 
-	hc_dump(tree);
+	//hc_dump(&tree);
 
 	return 0;
 }

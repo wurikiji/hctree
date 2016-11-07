@@ -1,5 +1,6 @@
 #include <inttypes.h>
 #include <unordered_map>
+#include <map>
 
 
 // user can define KEY_TYPE before including hctree.h
@@ -26,6 +27,8 @@
 
 #define BLOCK_SIZE		(4096)  //block size in bytes
 #define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t) * 2))
+//#define MAX_RECORDS		(3) 
+//#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t)) - 1)
 
 
 typedef struct __hctree hctree;
@@ -38,7 +41,7 @@ struct __hctree{
 	int fd;				// file descriptor for this tree
 	node*	lru;		// head page of LRU list
 	int (*cmp_func)(KEY_TYPE a, KEY_TYPE b);
-	unordered_map<uint64_t, node*> hmap; // hash map for searching page
+	map<uint64_t, node*> hmap; // hash map for searching page
 	uint64_t iTouched; 	// total touchcount for this tree
 	uint64_t pgCount;	// # of pages
 	uint64_t bSize; 	// block size
@@ -71,8 +74,8 @@ struct __record{
 	* Open new db files using hctree 
 	* This function will allocate a space for hctree **tree
 	*/
-int hc_open(hctree **tree, char *dbname);
-int hc_open(hctree **tree) {
+int hc_open(hctree *tree, char *dbname);
+int hc_open(hctree *tree) {
 	return hc_open(tree, NULL);
 }
 
