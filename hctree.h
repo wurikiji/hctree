@@ -45,6 +45,8 @@ struct __hctree{
 	uint64_t iTouched; 	// total touchcount for this tree
 	uint64_t pgCount;	// # of pages
 	uint64_t bSize; 	// block size
+	uint64_t iAccessed; // total accessed pages
+	uint64_t iSplit;	// total split count
 };
 
 // This will be managed as LRU list

@@ -69,6 +69,8 @@ int hc_open(hctree *tree, char *dbname)
 	(tree)->pgCount = 1;
 	(tree)->bSize = BLOCK_SIZE;
 	(tree)->cmp_func = NULL;
+	tree->iAccessed = 0;
+	tree->iSplit = 0;
 
 	return RETURN_SUCCESS;
 
@@ -160,6 +162,9 @@ int search_key_pos(hctree *tree, KEY_TYPE key, int *exist,
 		return 0;
 
 	while (next_node) {
+		//statistic
+		tree->iAccessed++;
+
 		idx = get_array_index(next_node, key, &exact);
 
 		data = (KEY_TYPE*)next_node->data;
@@ -485,6 +490,8 @@ static int __split_other(hctree* tree, node* target, int isLeaf) {
 }
 
 static int hc_split(hctree* tree, node* target, int isLeaf) {
+	//statistic
+	tree->iSplit++;
 	if (target->pgno == 0) {
 		return __split_root(tree, target, isLeaf);
 	} else {
@@ -576,7 +583,7 @@ int hc_set_hctree(hctree *tree, bool flag)
 	return RETURN_SUCCESS;
 }
 
-void trip(hctree *tree, node *next, int level) {
+void trip(hctree *tree, node *next, int level, uint64_t *count) {
 	if (next == NULL || next->iCount == 0) {
 		return;
 	}
@@ -590,15 +597,16 @@ void trip(hctree *tree, node *next, int level) {
 
 	it = tree->hmap.find(pointer[0]);
 	if (it != tree->hmap.end())  {
-		trip(tree, it->second, level + 1);
+		trip(tree, it->second, level + 1, count);
 	}
 	for(i = 0 ;i < next->iCount;i++)
 	{
 		it = tree->hmap.find(pointer[i*2 + 1]);
 		if (it != tree->hmap.end())  {
-			trip(tree, it->second, level + 1);
+			trip(tree, it->second, level + 1, count);
 		}
 	}
+#if 0
 	printf("PGNO %u, PARENT %u, LEVEL %d\n", 
 			next->pgno, next->iParent, level);
 	
@@ -606,13 +614,17 @@ void trip(hctree *tree, node *next, int level) {
 		printf("%" PRIu64 " ", data[i]);
 	}
 	printf("\n");
+#endif
+	if (count) *count += 1;
 }
 void hc_dump(hctree *tree) {
 	node *next = tree->hmap.find(0)->second;
 	KEY_TYPE *data = (KEY_TYPE*)next->data;
 	uint64_t *pointer = (uint64_t*)(data + MAX_RECORDS);
+	uint64_t count = 0;
 
-	trip(tree, next, 0);
+	trip(tree, next, 0, &count);
+	printf("Total %" PRIu64 " pages\n", count);
 #if 0
 	for (int i = 0 ;i < next->iCount;i++)
 	{

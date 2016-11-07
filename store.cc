@@ -24,7 +24,7 @@ int main(int argc, char *argv[])
 	printf("Get and store %d, max record %d\n", num, MAX_RECORDS);
 	for (int i =1 ;i <= num; i++)
 	{
-#if 0
+#if 1
 		v.push_back(rand()%1048576);
 #else
 		v.push_back(i);
@@ -32,6 +32,10 @@ int main(int argc, char *argv[])
 		hc_put(&tree, v[i-1], 0);
 		//printf("%d ", i);
 	}
+
+	printf("End insert\n");
+	printf("Accessed pages %" PRIu64 "\n", tree.iAccessed);
+	printf("Split %" PRIu64 "\n", tree.iSplit);
 
 	for (int i = 1;i <= num;i++)
 	{
@@ -41,8 +45,10 @@ int main(int argc, char *argv[])
 			break;
 		}
 	}
+	printf("End read\n");
+	printf("Accessed pages %" PRIu64 "\n", tree.iAccessed);
 
-	//hc_dump(&tree);
+	hc_dump(&tree);
 
 	return 0;
 }
