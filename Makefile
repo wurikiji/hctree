@@ -21,6 +21,7 @@ DIR = output
 SAMPLE		= store
 SAMPLE_SRCS	=	store.cc
 
+
 ALL: $(OUTPUT) $(SAMPLE)
 
 lib: $(OUTPUT) 
@@ -34,5 +35,5 @@ $(SAMPLE):	$(SAMPLE_SRCS:.cc=.o)
 	LD_RUN_PATH=./ $(CC) $(CXXFLAGS) $< $(INCLUDES) $(LDFLAGS) -lhctree -o $@
 
 clean:
-	$(RM) -rf $(OBJS) $(OUTPUT) $(SAMPLE)
+	$(RM) -rf $(OBJS) $(SAMPLE_SRCS:.cc=.o) $(OUTPUT) $(SAMPLE)
 

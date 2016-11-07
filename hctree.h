@@ -26,9 +26,9 @@
 #define		RETURN_NOTEXIST	0x01
 
 #define BLOCK_SIZE		(4096)  //block size in bytes
-#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t) * 2))
-//#define MAX_RECORDS		(3) 
-//#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t)) - 1)
+//#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t) * 2))
+#define MAX_RECORDS		(BLOCK_SIZE / (sizeof(KEY_TYPE) + sizeof(uint64_t)) - 1)
+//#define MAX_RECORDS		(3)  // for test 
 
 
 typedef struct __hctree hctree;
