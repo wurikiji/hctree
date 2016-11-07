@@ -23,7 +23,7 @@ using namespace std;
 	* Open new db files using hctree 
 	* This function will allocate a space for hctree **tree
 	*/
-int open(hctree **tree, char *dbname)
+int hc_open(hctree **tree, char *dbname)
 {
 	int ret = 0;
 	node* lru;
@@ -32,41 +32,47 @@ int open(hctree **tree, char *dbname)
 	*tree = (hctree*) malloc(sizeof(hctree));
 	if (tree == NULL) {
 		ret = RETURN_NOMEM;
-		goto fail;
+		goto open_fail;
 	}
 
 	lru = (node*) malloc(sizeof(node));
 	if (NULL == lru) {
 		ret = RETURN_NOMEM;
-		goto fail;
+		goto open_fail;
 	}
 	memset(lru, 0, sizeof(node));
 
 	ret = __memalign(&data, 512, BLOCK_SIZE);
 	if (ret) {
 		ret = RETURN_NOMEM;
-		goto fail;
+		goto open_fail;
 	}
 	memset(data, 0xff, BLOCK_SIZE);
 
-	fd = open(dbname, O_RDWR | O_DIRECT);
-	if (fd) {
-		ret = RETURN_SYSTEM;
-		goto fail;
+	(*tree)->fd = 0;
+
+	if (dbname) {
+		fd = open(dbname, O_RDWR | O_DIRECT);
+		if (fd) {
+			ret = RETURN_SYSTEM;
+			goto open_fail;
+		}
 	}
 
 	lru->data = data;
 
 	(*tree)->lru = lru;
-	(*tree)->hmap.insert(pair<uint64_t, node*>(0, lru)); // add lru head
+	(*tree)->hmap.reserve(253);
+	(*tree)->hmap.insert({0, lru}); // add lru head
 	(*tree)->isHctree = 0;
-	(*tree)->fd = 0;
 	(*tree)->iTouched = 0;
-	(*tree)->pgCount = 0;
+	(*tree)->pgCount = 1;
+	(*tree)->bSize = BLOCK_SIZE;
+	(*tree)->cmp_func = NULL;
 
 	return RETURN_SUCCESS;
 
-fail:
+open_fail:
 	if (*tree) {
 		if (lru) {
 			if (data) {
@@ -82,7 +88,7 @@ fail:
 /*	*
 	* Close db 
 	*/
-int close(hctree *tree)
+int hc_close(hctree *tree)
 {
 	if (tree) {
 		if (tree->lru) {
@@ -104,33 +110,34 @@ int close(hctree *tree)
 #define RIGHT_NODE		0x02
 #define LEFT_NODE		0x04
 
+int compare(KEY_TYPE a, KEY_TYPE b) {
+	if (a == b) return 0;
+	if (a < b)  return -1;
+	return 1;
+}
 // using sorted array to represent data in node 
-int get_array_index(void* data, KEY_TYPE key, int *exist) 
+int get_array_index(node* next_node, KEY_TYPE key, int *exist) 
 {
 	int idx = 0;
-	KEY_TYPE *array = (KEY_TYPE*)data;
-	KEY_TYPE *temp;
+	KEY_TYPE *array = (KEY_TYPE*)next_node->data;
+	int cResult = 0;
 
-	temp = (KEY_TYPE*)malloc(sizeof(KEY_TYPE));
-	memset(temp, 0xff, sizeof(KEY_TYPE));
 	
 	*exist = CUR_NOT;
 
-	for (idx = 0; idx < MAX_RECORDS; idx++)
+	for (idx = 0; idx < next_node->iCount; idx++)
 	{
-		if (array[idx] == key) {
+		cResult = compare(key, array[idx]);
+		if (cResult == 0) {
 			*exist = CUR_EXIST;
 			break;
-		} else if (0 == memcmp(&array[idx], temp, sizeof(KEY_TYPE))) { // empty Record
-			*exist = RIGHT_NODE;
-			idx -= 1;
-			break;
-		} else if (array[idx] > key) { // smallest record larger than key 
+		} else if (cResult < 0) {
 			*exist = LEFT_NODE; 
 			break;
+		} else {
+			*exist = RIGHT_NODE;
 		}
 	}
-	__free(temp);
 	return idx;
 }
 
@@ -178,14 +185,14 @@ int get_binary_index(void* data, KEY_TYPE key, int *exist)
 	return prev_idx;
 }
 
-int search_key_pos(hctree *tree, KEY_TYPE key, const bool hot, int *exist, 
+int search_key_pos(hctree *tree, KEY_TYPE key, int *exist, 
 					set<node*> *vct) 
 {
 	bool finish = false;
 	int idx; 
 	int exact;
 	KEY_TYPE *data;
-	char* next_page;
+	uint64_t *next_page;
 	uint64_t pgno = 0;
 	node *next_node;
 	unordered_map<uint64_t, node*>::iterator it;
@@ -194,25 +201,25 @@ int search_key_pos(hctree *tree, KEY_TYPE key, const bool hot, int *exist,
 	it = tree->hmap.find(0);
 	next_node = it->second;
 
+	if (next_node->iCount == 0)
+		return 0;
+
 	while (next_node) {
-		idx = get_array_index(next_node->data, key, &exact);
+		idx = get_array_index(next_node, key, &exact);
 
 		data = (KEY_TYPE*)next_node->data;
-		next_page = ((char*)next_node->data) + BLOCK_SIZE;
+		next_page = (uint64_t*)(data + MAX_RECORDS);
 		*exist = exact;
 
 		tree->lru = next_node;
 		 
 		vct->insert(next_node); // push internal node list 
 
-		if (exact == CUR_NOT) {
-			return idx;
-		} else if (exact == CUR_EXIST) {
-			memcpy(&pgno, next_page - idx * 2, sizeof(uint64_t)); //left node
-		} else if (exact == LEFT_NODE) {
-			memcpy(&pgno, next_page - idx * 2, sizeof(uint64_t)); //left node
+		if (exact == CUR_EXIST || exact == LEFT_NODE) {
+			pgno = next_page[idx * 2]; //left node
 		} else {
-			memcpy(&pgno, next_page - idx * 2 + 1, sizeof(uint64_t)); //right node
+			idx -= 1;
+			pgno = next_page[idx * 2 + 1]; //right node
 		}
 
 		it = tree->hmap.find(pgno);
@@ -246,13 +253,16 @@ void increase_touchcount(hctree *tree, set<node*> *vct, bool hot)
 	* If data are warm then touch count will increase by 1
 	* If data are cold then touch count will not increase
 	*/
-int get(hctree *tree, KEY_TYPE key, const bool hot)
+int hc_get(hctree *tree, KEY_TYPE key, bool hot)
 {
 	int exist;
 	set<node*> vct;
-	search_key_pos(tree, key, hot, &exist, &vct);
-
+	int idx = search_key_pos(tree, key, &exist, &vct);
+	
 	if (exist == CUR_EXIST) {
+		if (hot == 0x00) {
+			hot = WARM_DATA;
+		}
 		increase_touchcount(tree, &vct, hot);
 		return RETURN_EXIST;
 	}
@@ -260,42 +270,266 @@ int get(hctree *tree, KEY_TYPE key, const bool hot)
 	return RETURN_NOTEXIST;
 }
 
+static int __split_root(hctree* tree, node* target) {
+	int ret; 
+	node *leaf1, *leaf2;
+	KEY_TYPE *data1, *data2;
+	uint64_t pgno = tree->pgCount;
+
+	leaf1 = (node*) malloc(sizeof(node));
+	leaf2 = (node*) malloc(sizeof(node));
+
+	memset(leaf1, 0, sizeof(node));
+	memset(leaf2, 0, sizeof(node));
+
+	ret = __memalign((void**)&data1, 512, BLOCK_SIZE);
+	ret = __memalign((void**)&data2, 512, BLOCK_SIZE);
+
+	memset(data1, 0xff, BLOCK_SIZE);
+	memset(data2, 0xff, BLOCK_SIZE);
+
+	leaf1->data = (void*)data1;
+	leaf1->pgno = pgno;
+	leaf1->iParent = 0;
+
+	leaf2->data = (void*)data2;
+	leaf2->pgno = pgno + 1;
+	leaf2->iParent = 0;
+
+	tree->hmap.insert({pgno, leaf1});
+	tree->hmap.insert({pgno + 1, leaf2});
+	tree->pgCount += 2;
+
+	KEY_TYPE *data = (KEY_TYPE*)(target->data);
+	uint64_t *pointer = (uint64_t*)(data + MAX_RECORDS);
+	uint64_t *pointer1, *pointer2; 
+
+	pointer1 = (uint64_t*)(data1 + MAX_RECORDS);
+	pointer2 = (uint64_t*)(data2 + MAX_RECORDS);
+
+	// move half to leaf1
+	memmove(data1, data, 
+			sizeof(KEY_TYPE) * (target->iCount/2));
+	memmove(pointer1, pointer, 
+			2 * sizeof(uint64_t) * (target->iCount/2));
+
+	leaf1->iCount = target->iCount/2;
+	for (int i = 0 ;i < target->iCount/2;i++)
+	{
+		leaf1->iTouched += target->aCount[i];
+		leaf1->aCount[i] = target->aCount[i];
+	}
+	
+
+	// move remains to leaf2 
+	memmove(data2, data + (target->iCount/2),
+						sizeof(KEY_TYPE) * ((target->iCount+1)/2));
+	memmove(pointer2, pointer + (target->iCount/2) * 2, 
+						2 * sizeof(uint64_t) * ((target->iCount+1)/2));
+
+	leaf2->iCount = (target->iCount + 1)/2;
+	for (int i = target->iCount/2 ;i < target->iCount;i++)
+	{
+		leaf2->iTouched += target->aCount[i];
+		leaf2->aCount[i - target->iCount/2] = target->aCount[i];
+	}
+	
+	memset(data, 0xff, BLOCK_SIZE);
+	data[0] = data1[leaf1->iCount - 1]; //insert middle key to root 
+//printf("Middle key %" PRIu64 "\n", data[0]);
+	/* Set left and right pointer */
+	pointer[0] = leaf1->pgno;
+	pointer[1] = leaf2->pgno;
+	memset(target->aCount, 0, sizeof(MAX_RECORDS) * sizeof(uint64_t));
+	target->iCount = 1;
+	target->aCount[0] = leaf1->aCount[leaf1->iCount - 1];
+
+	return RETURN_SUCCESS;
+
+split_fail: 
+	return ret;
+}
+
+static int __get_pos_in_this_node(node* target, KEY_TYPE key, int *exist) {
+	int idx = 0;
+	KEY_TYPE *array = (KEY_TYPE*)target->data;
+	int cResult = 0;
+
+	*exist = CUR_NOT;
+
+	for (idx = 0; idx < target->iCount; idx++)
+	{
+		cResult = compare(key, array[idx]);
+		if (cResult == 0) {
+			*exist = CUR_EXIST;
+			break;
+		} else if (cResult < 0) {
+			*exist = LEFT_NODE; 
+			break;
+		} else {
+			*exist = RIGHT_NODE;
+		}
+	}
+	return idx;
+}
+
+static int hc_split(hctree* tree, node* target);
+static int __split_other(hctree* tree, node* target) {
+	int ret, idx, exist;
+	node *parent;
+	node *new_node;
+	KEY_TYPE *new_data, *data;
+	uint64_t *new_pointer, *pointer;
+	KEY_TYPE middle_key;
+
+	new_node = (node*) malloc(sizeof(node));
+	memset(new_node, 0x00 , sizeof(node));
+
+	ret = __memalign((void**)&new_data, 512, BLOCK_SIZE);
+	memset(new_data, 0xff , BLOCK_SIZE);
+
+	new_node->data = (void*) new_data;
+	new_node->pgno = tree->pgCount + 1;
+	new_node->iParent = target->iParent;
+	tree->hmap.insert({new_node->pgno, new_node});
+
+	tree->pgCount++;
+
+	data = (KEY_TYPE*)target->data;
+	new_pointer = (uint64_t*)(new_data + MAX_RECORDS);
+	pointer = (uint64_t*)(data + MAX_RECORDS);
+
+	// move right half to new_node
+	memmove(new_data, data + (target->iCount/2),
+						sizeof(KEY_TYPE) * ((target->iCount+1)/2));
+	memmove(new_pointer, pointer + (target->iCount/2) * 2, 
+						2 * sizeof(uint64_t) * ((target->iCount+1)/2));
+
+	new_node->iCount = (target->iCount + 1)/2;
+	for (int i = target->iCount/2 ;i < target->iCount;i++)
+	{
+		new_node->iTouched += target->aCount[i];
+		new_node->aCount[i - target->iCount/2] = target->aCount[i];
+		target->iTouched -= target->aCount[i];
+		target->aCount[i] = 0;
+		memset(&data[i], 0xff, sizeof(KEY_TYPE));
+		memset(&pointer[i*2], 0xff, sizeof(uint64_t) * 2);
+	}
+
+	target->iCount -= new_node->iCount;
+
+	middle_key = data[target->iCount - 1];
+	parent = tree->hmap.find(target->iParent)->second; // get parent node
+
+//printf("Middle key %" PRIu64 "\n", middle_key);
+	idx = __get_pos_in_this_node(parent, middle_key, &exist);
+
+	int start;
+	if (exist == CUR_EXIST) {
+		printf("Error on split: middle key %" PRIu64 " exists on internal node\n",
+					middle_key);
+		tree->lru = parent;
+		hc_dump(tree);
+		exit(0);
+	} else if (exist == LEFT_NODE) {
+		start = idx;
+	} else if (exist == RIGHT_NODE) { 
+		start = idx;
+	} else {
+		printf("Error on split: node has no data\n");
+		exit(0);
+	}
+
+	data = (KEY_TYPE*) parent->data;
+	pointer = (uint64_t*)(data + MAX_RECORDS);
+
+	// move data 
+	memmove(&data[start + 1], &data[start],
+			sizeof(KEY_TYPE) * (target->iCount - start));
+	memmove(&pointer[(start + 1) * 2],
+			&pointer[start * 2],
+			2 * sizeof(uint64_t) * (target->iCount - start));
+	// save key 
+	memcpy(&data[idx], &middle_key, sizeof(KEY_TYPE));
+	pointer[idx * 2] = target->pgno;
+	pointer[idx * 2 + 1] = new_node->pgno;
+	if (idx != parent->iCount) // if it is not last key
+		pointer[(idx + 1) * 2] = new_node->pgno; // then modify left child of next key
+	parent->aCount[idx] = target->aCount[target->iCount - 1];
+	parent->iTouched += parent->aCount[idx];
+	parent->iCount++;
+	
+	if (parent->iCount == MAX_RECORDS)
+		return hc_split(tree, parent);
+
+	return RETURN_SUCCESS;
+}
+
+static int hc_split(hctree* tree, node* target) {
+	if (target->pgno == 0) {
+	printf("Split root\n");
+		return __split_root(tree, target);
+	} else {
+	printf("Split other\n");
+		return __split_other(tree, target);
+	}
+}
 /* 	*
 	* Insert data into hctree
 	* If you already know hotness, give a touch count hint
 	*/
-int put(hctree *tree, KEY_TYPE key, bool hot) 
+int hc_put(hctree *tree, KEY_TYPE key, bool hot) 
 {
 	int idx;
 	int exist;
 	set<node*> vct;
 	node *target; 
 	KEY_TYPE *data;
-	char* page;
+	uint64_t *pointer;
 
-	idx = search_key_pos(tree, key, hot, &exist, &vct);
-
-	target = tree->lru;
+	idx = search_key_pos(tree, key, &exist, &vct);
 
 	increase_touchcount(tree, &vct, hot);
 
 	vct.clear();
+
+	target = tree->lru;
 	data = (KEY_TYPE*) target->data;
-	page = ((char*) target->data) + BLOCK_SIZE;
+	pointer = (uint64_t*) (data + MAX_RECORDS);
+
+	if (hot == 0x00) {
+		hot = WARM_DATA;
+	}
 
 	if (exist == CUR_NOT) { // first insertion
-		target->iCount++;
 		memcpy(&data[0], &key, sizeof(KEY_TYPE));
+		target->aCount[0]++;
+		target->iCount++;
 	} else if (exist == CUR_EXIST) {
+		target->aCount[idx]++;
 		// do nothing because it already exists
 	} else {
-		if (target->iCount == MAX_RECORDS) { //need split
-		}
+		int start;
 		if (exist == LEFT_NODE) {
-			//memcpy(
+			start = idx;
 		} else {
+			start = idx + 1;
+			idx = idx + 1;
 		}
+		// move data 
+		memmove(&data[start + 1], &data[start],
+			sizeof(KEY_TYPE) * (target->iCount - start));
+		memmove(&pointer[(start + 1) * 2],
+				&pointer[start * 2],
+				2 * sizeof(uint64_t) * (target->iCount - start));
+		// save key 
+		memcpy(&data[idx], &key, sizeof(KEY_TYPE));
+		target->aCount[idx]++;
 		target->iCount++;
+
+		if (target->iCount == MAX_RECORDS) { //need split
+			hc_split(tree, target);
+		}
 	}
 	return RETURN_SUCCESS;
 }
@@ -303,7 +537,7 @@ int put(hctree *tree, KEY_TYPE key, bool hot)
 /*	*
 	* Remove data from hctree
 	*/
-int remove(hctree *tree, KEY_TYPE key) 
+int hc_remove(hctree *tree, KEY_TYPE key) 
 {
 	return RETURN_SUCCESS;
 }
@@ -311,7 +545,7 @@ int remove(hctree *tree, KEY_TYPE key)
 /* 	*
 	* Bulk load the data from files 
 	*/
-int load(hctree *tree, char *filename)
+int hc_load(hctree *tree, char *filename)
 {
 	return RETURN_SUCCESS;
 }
@@ -319,8 +553,20 @@ int load(hctree *tree, char *filename)
 /*	*
 	* Set tree to be b+tree or hctree
 	*/
-int set_hctree(hctree *tree, bool flag)
+int hc_set_hctree(hctree *tree, bool flag)
 {
 	tree->isHctree = flag;
 	return RETURN_SUCCESS;
+}
+
+void hc_dump(hctree *tree) {
+	node *next = tree->hmap.find(0)->second;
+	KEY_TYPE *data = (KEY_TYPE*)next->data;
+	uint64_t *pointer = (uint64_t*)(data + MAX_RECORDS);
+
+	for (int i = 0 ;i < next->iCount;i++)
+	{
+		printf("data %d: %" PRIu64 ", p1 %" PRIu64 ", p2 %" PRIu64 "\n", 
+				i, data[i], pointer[i*2], pointer[i*2+1]);
+	}
 }

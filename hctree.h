@@ -37,9 +37,11 @@ struct __hctree{
 	bool isHctree;		// true for hctree, false for b+tree
 	int fd;				// file descriptor for this tree
 	node*	lru;		// head page of LRU list
+	int (*cmp_func)(KEY_TYPE a, KEY_TYPE b);
 	unordered_map<uint64_t, node*> hmap; // hash map for searching page
 	uint64_t iTouched; 	// total touchcount for this tree
 	uint64_t pgCount;	// # of pages
+	uint64_t bSize; 	// block size
 };
 
 // This will be managed as LRU list
@@ -51,6 +53,7 @@ struct __node{
 	uint64_t	iParent; 	// parent node page number
 	uint64_t	iCount; 	// # of total records in this node
 	uint64_t	pgno;
+	uint64_t	aCount[MAX_RECORDS]; 	// touch count array for records in this node
 };
 
 
@@ -68,12 +71,15 @@ struct __record{
 	* Open new db files using hctree 
 	* This function will allocate a space for hctree **tree
 	*/
-int open(hctree **tree, char *dbname);
+int hc_open(hctree **tree, char *dbname);
+int hc_open(hctree **tree) {
+	return hc_open(tree, NULL);
+}
 
 /*	*
 	* Close db 
 	*/
-int close(hctree **tree);
+int hc_close(hctree **tree);
 
 /*	*
 	* Get data from hctree
@@ -82,25 +88,27 @@ int close(hctree **tree);
 	* If data are warm then touch count will increase by 1
 	* If data are cold then touch count will not increase
 	*/
-int get(hctree *tree, KEY_TYPE key, bool hot) ;
+int hc_get(hctree *tree, KEY_TYPE key, bool hot) ;
 
 /* 	*
 	* Insert data into hctree
 	* If you already know hotness, give a touch count hint
 	*/
-int put(hctree *tree, KEY_TYPE key, bool hot) ;
+int hc_put(hctree *tree, KEY_TYPE key, bool hot) ;
 
 /*	*
 	* Remove data from hctree
 	*/
-int remove(hctree *tree, KEY_TYPE key) ;
+int hc_remove(hctree *tree, KEY_TYPE key) ;
 
 /* 	*
 	* Bulk load the data from files 
 	*/
-int load(hctree *tree, char *filename);
+int hc_load(hctree *tree, char *filename);
 
 /*	*
 	* Set tree to be b+tree or hctree
 	*/
-int set_hctree(hctree *tree, bool flag) ;
+int hc_set_hctree(hctree *tree, bool flag) ;
+
+void hc_dump(hctree *tree);

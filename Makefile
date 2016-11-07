@@ -5,7 +5,7 @@ LD 	= $(PREFIX)ld
 RM	= rm
 
 INCLUDES = -I./
-CPPFLAGS 	= -fpic -std=gnu++11
+CPPFLAGS 	= -fpic -std=gnu++11 -O0 -g 
 #CXXFLAGS 	= -fpic -std=gnu++11
 ASFLAGS	= 
 LDFLAGS	= -L./
