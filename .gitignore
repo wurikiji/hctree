@@ -33,3 +33,5 @@ store
 cscope.out
 *.out
 *.txt
+massif*
+*.swp
