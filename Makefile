@@ -20,9 +20,13 @@ DIR = output
 
 SAMPLE		= store
 SAMPLE_SRCS	=	store.cc
+SAMPLE2 	= linkbench
+SAMPLE2_SRCS = 	store2.cc
+DEP = .dep
+$(shell mkdir -p $(DEP) &> /dev/null)
 
 
-ALL: $(OUTPUT) $(SAMPLE)
+ALL: $(OUTPUT) $(SAMPLE) $(SAMPLE2)
 
 lib: $(OUTPUT) 
 
@@ -32,6 +36,9 @@ $(OUTPUT): $(OBJS)
 	$(CC) -shared $(OBJS) $(CPPFLAGS) $(INCLUDES) -o $@
 
 $(SAMPLE):	$(SAMPLE_SRCS:.cc=.o)
+	LD_RUN_PATH=./ $(CC) $(CXXFLAGS) $< $(INCLUDES) $(LDFLAGS) -lhctree -o $@
+
+$(SAMPLE2):	$(SAMPLE2_SRCS:.cc=.o)
 	LD_RUN_PATH=./ $(CC) $(CXXFLAGS) $< $(INCLUDES) $(LDFLAGS) -lhctree -o $@
 
 clean:

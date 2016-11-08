@@ -21,15 +21,16 @@ int main(int argc, char *argv[])
 	hc_open(&tree);
 
 	srand(time(NULL));
+	hc_set_hctree(&tree, HCTREE);
 	printf("Get and store %d, max record %d\n", num, MAX_RECORDS);
 	for (int i =1 ;i <= num; i++)
 	{
-#if 0
+#if 1
 		v.push_back(rand()%1048576);
 #else
 		v.push_back(i);
 #endif
-		hc_put(&tree, v[i-1], 0);
+		hc_put(&tree, v[i-1], true);
 #if 0
 	hc_dump(&tree);
 	system("read line");
@@ -44,7 +45,7 @@ int main(int argc, char *argv[])
 	for (int i = 1;i <= num;i++)
 	{
 		//printf("Get %d\n", i);
-		if (RETURN_EXIST != hc_get(&tree, v[i-1],0))
+		if (RETURN_EXIST != hc_get(&tree, v[i-1],true))
 		{
 	hc_dump(&tree);
 			break;

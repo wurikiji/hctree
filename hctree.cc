@@ -64,7 +64,7 @@ int hc_open(hctree *tree, char *dbname)
 
 	(tree)->lru = lru;
 	(tree)->hmap[0] = lru; // add lru head
-	(tree)->isHctree = 0;
+	(tree)->isHCtree = 0;
 	(tree)->iTouched = 0;
 	(tree)->pgCount = 1;
 	(tree)->bSize = BLOCK_SIZE;
@@ -161,9 +161,12 @@ int search_key_pos(hctree *tree, KEY_TYPE key, int *exist,
 	if (next_node->iCount == 0)
 		return 0;
 
+	int i = 0;
 	while (next_node) {
 		//statistic
-		tree->iAccessed++;
+		if (i > 1)
+			tree->iAccessed++;
+		i++;
 
 		idx = get_array_index(next_node, key, &exact);
 
@@ -194,18 +197,12 @@ int search_key_pos(hctree *tree, KEY_TYPE key, int *exist,
 	return idx;
 }
 
-void increase_touchcount(hctree *tree, set<node*> *vct, bool hot) 
+void increase_touchcount(hctree *tree, set<node*> *vct, uint64_t hot) 
 {
-	if (hot == HOT_DATA) 
-		tree->iTouched += 2;
-	else if (hot != COLD_DATA) 
-		tree->iTouched += 1;
+	tree->iTouched += hot;
 
 	for (set<node*>::iterator it = vct->begin(); it != vct->end(); ++it) {
-		if (hot == HOT_DATA) 
-			(*it)->iTouched += 2;
-		else if (hot != COLD_DATA) 
-			(*it)->iTouched += 1;
+		(*it)->iTouched += hot;
 	}
 }
 /*	*
@@ -222,10 +219,11 @@ int hc_get(hctree *tree, KEY_TYPE key, bool hot)
 	int idx = search_key_pos(tree, key, &exist, &vct, 1);
 	
 	if (exist == CUR_EXIST) {
-		if (hot == 0x00) {
-			hot = WARM_DATA;
+		if (hot == 0x00 || hot == WARM_DATA) {
+			increase_touchcount(tree, &vct, 1);
+		} else if (hot == HOT_DATA) {
+			increase_touchcount(tree, &vct, 2);
 		}
-		increase_touchcount(tree, &vct, hot);
 		return RETURN_EXIST;
 	}
 
@@ -276,11 +274,11 @@ static int __split_root(hctree* tree, node* target, int isLeaf) {
 
 	leaf1->data = (void*)data1;
 	leaf1->pgno = pgno;
-	leaf1->iParent = 0;
+	leaf1->iParent = target->pgno;
 
 	leaf2->data = (void*)data2;
 	leaf2->pgno = pgno + 1;
-	leaf2->iParent = 0;
+	leaf2->iParent = target->pgno;
 
 	tree->hmap[pgno] = leaf1;
 	tree->hmap[pgno + 1] =  leaf2;
@@ -332,6 +330,10 @@ static int __split_root(hctree* tree, node* target, int isLeaf) {
 		memmove(data2, &data2[1] , sizeof(KEY_TYPE) * leaf2->iCount);
 		memmove(pointer2, &pointer2[1], 
 					sizeof(uint64_t) * (leaf2->iCount + 1));
+	} else { // make doubly linked list for leaf pages
+		leaf1->next = leaf2->pgno;
+		leaf2->prev = leaf1->pgno;
+		leaf2->next = 0;
 	}
 
 //printf("Middle key %" PRIu64 "\n", data[0]);
@@ -434,6 +436,22 @@ static int __split_other(hctree* tree, node* target, int isLeaf) {
 		memmove(new_data, &new_data[1], sizeof(KEY_TYPE) * new_node->iCount);
 		memmove(new_pointer, &new_pointer[1], 
 					sizeof(uint64_t) * (new_node->iCount + 1));
+	} else { // make doubly linked list for leaf pages
+		map<uint64_t, node*>::iterator it;
+		node *next_node;
+
+		it = tree->hmap.find(target->next);
+		if (target->next != 0 && it != tree->hmap.end()) {
+			next_node = it->second;
+		} else {
+			next_node == NULL;
+		}
+		target->next = new_node->pgno;
+		if (next_node) {
+			new_node->next = next_node->pgno;
+			next_node->prev = new_node->pgno;
+		}
+		new_node->prev = target->pgno;
 	}
 //printf("Middle key %" PRIu64 "\n", middle_key);
 	idx = __get_pos_in_this_node(parent, middle_key, &exist);
@@ -491,20 +509,71 @@ static int __split_other(hctree* tree, node* target, int isLeaf) {
 	return RETURN_SUCCESS;
 }
 
+// split like root 
+static int __down_split(hctree* tree, node* target) {
+	return RETURN_SUCCESS;
+}
+
+static uint64_t get_hc_page(hctree* tree) { 
+	uint64_t min_touch_count = 0xffffffffffffffffLLU;
+	uint64_t ret = 0;
+	node *current, *next;
+	map<uint64_t, node*>::iterator it;
+	current = tree->hmap.find(0)->second;
+	next = current;
+
+	while (next) { // get left most leaf page
+		current = next;
+		KEY_TYPE* data = (KEY_TYPE*)current->data;
+		uint64_t *pointer = (uint64_t*) (data + MAX_RECORDS);
+		it = tree->hmap.find(pointer[0]);
+		if (it != tree->hmap.end()) 
+			next = it->second;
+		else
+			next = NULL;
+	}
+
+	next = current;
+	while (next) { // scan all leaves
+		current = next;
+		if (current->iTouched < min_touch_count) {
+			min_touch_count = current->iTouched;
+			ret = current->pgno;
+		}
+		if (current->next == 0) {
+			break;
+		}
+		it = tree->hmap.find(current->next);
+		if (it != tree->hmap.end()) 
+			next = it->second;
+		else
+			next = NULL;
+	}
+
+	return ret;
+}
 static int hc_split(hctree* tree, node* target, int isLeaf) {
 	//statistic
+	bool down_split = false;
 	tree->iSplit++;
-	if (target->pgno == 0) {
+	if (tree->isHCtree == HCTREE && isLeaf) {
+		// Split down the least touched page 
+		uint64_t hcPage = get_hc_page(tree);
+		if (hcPage == target->pgno)
+			down_split = true;
+	}
+	if (down_split || target->pgno == 0) {
 		return __split_root(tree, target, isLeaf);
 	} else {
 		return __split_other(tree, target, isLeaf);
 	}
 }
+
 /* 	*
 	* Insert data into hctree
 	* If you already know hotness, give a touch count hint
 	*/
-int hc_put(hctree *tree, KEY_TYPE key, bool hot) 
+int hc_put(hctree *tree, KEY_TYPE key, uint64_t hint) 
 {
 	int idx;
 	int exist;
@@ -515,17 +584,13 @@ int hc_put(hctree *tree, KEY_TYPE key, bool hot)
 
 	idx = search_key_pos(tree, key, &exist, &vct, 0);
 
-	increase_touchcount(tree, &vct, hot);
+	increase_touchcount(tree, &vct, hint);
 
 	vct.clear();
 
 	target = tree->lru;
 	data = (KEY_TYPE*) target->data;
 	pointer = (uint64_t*) (data + MAX_RECORDS);
-
-	if (hot == 0x00) {
-		hot = WARM_DATA;
-	}
 
 	if (exist == CUR_NOT) { // first insertion
 		memcpy(&data[0], &key, sizeof(KEY_TYPE));
@@ -576,11 +641,13 @@ int hc_load(hctree *tree, char *filename)
 	*/
 int hc_set_hctree(hctree *tree, bool flag)
 {
-	tree->isHctree = flag;
+	tree->isHCtree = flag;
 	return RETURN_SUCCESS;
 }
 
-void trip(hctree *tree, node *next, int level, uint64_t *count) {
+int max_level;
+uint64_t ac_count;
+void trip(hctree *tree, node *next, int level) {
 	if (next == NULL || next->iCount == 0) {
 		return;
 	}
@@ -594,17 +661,20 @@ void trip(hctree *tree, node *next, int level, uint64_t *count) {
 
 	it = tree->hmap.find(pointer[0]);
 	if (it != tree->hmap.end())  {
-		trip(tree, it->second, level + 1, count);
+		trip(tree, it->second, level + 1);
 	}
 	for(i = 0 ;i < next->iCount;i++)
 	{
 		it = tree->hmap.find(pointer[i + 1]);
 		if (it != tree->hmap.end())  {
-			trip(tree, it->second, level + 1, count);
+			trip(tree, it->second, level + 1);
 		}
 	}
-#if 1
-	printf("PGNO %u, PARENT %u, LEVEL %d\n", 
+	ac_count++;
+	if (level > max_level) 
+		max_level = level;
+#if 0
+	printf("PGNO %" PRIu64 ", PARENT %" PRIu64 ", LEVEL %d\n", 
 			next->pgno, next->iParent, level);
 	
 	for (int i =0 ;i < next->iCount; i++) {
@@ -612,12 +682,13 @@ void trip(hctree *tree, node *next, int level, uint64_t *count) {
 	}
 	printf("\n");
 #endif
-	if (count) *count += 1;
 }
 void hc_dump(hctree *tree) {
 	node *next = tree->hmap.find(0)->second;
-	uint64_t count;
 
-	trip(tree, next, 0, &count);
-	printf("Total %" PRIu64 " pages\n", count);
+	max_level = 0;
+	ac_count = 0;
+	trip(tree, next, 0);
+	printf("Total %" PRIu64 " pages, max level %d\n", 
+				ac_count, max_level);
 }
